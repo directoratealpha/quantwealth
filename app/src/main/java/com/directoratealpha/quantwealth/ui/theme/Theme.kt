@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
@@ -83,5 +85,11 @@ object Formatters {
     fun formatPct(pct: Double, showSign: Boolean = true): String {
         val sign = if (showSign && pct > 0) "+" else ""
         return String.format(Locale.US, "%s%.2f%%", sign, pct)
+    }
+
+    fun formatTimestamp(timestampSec: Long, includeTime: Boolean): String {
+        if (timestampSec <= 0L) return ""
+        val pattern = if (includeTime) "MMM d, HH:mm" else "MMM d, yyyy"
+        return SimpleDateFormat(pattern, Locale.US).format(Date(timestampSec * 1000L))
     }
 }

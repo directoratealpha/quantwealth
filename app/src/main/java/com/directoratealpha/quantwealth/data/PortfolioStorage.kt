@@ -7,7 +7,7 @@ import org.json.JSONObject
 
 class PortfolioStorage(context: Context) {
 
-    private val prefs = context.getSharedPreferences("quantwealth_state_v1", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("quantwealth_state_v2", Context.MODE_PRIVATE)
 
     fun load(): PortfolioState {
         val raw = prefs.getString("state_json", null) ?: return PortfolioState()
@@ -84,14 +84,6 @@ class PortfolioStorage(context: Context) {
                 ProfitChallenge()
             }
 
-            val unlockedSignals = HashSet<String>()
-            val sigArr = obj.optJSONArray("unlockedFullSignalSymbols")
-            if (sigArr != null) {
-                for (i in 0 until sigArr.length()) {
-                    unlockedSignals.add(sigArr.getString(i))
-                }
-            }
-
             PortfolioState(
                 cashBalance = cash,
                 positions = positions,
@@ -99,8 +91,7 @@ class PortfolioStorage(context: Context) {
                 watchlistSymbols = watchlist,
                 maxWatchlistSlots = maxSlots,
                 challenge = challenge,
-                isPro = isPro,
-                unlockedFullSignalSymbols = unlockedSignals
+                isPro = isPro
             )
         } catch (_: Exception) {
             PortfolioState()
@@ -158,10 +149,6 @@ class PortfolioStorage(context: Context) {
             put("createdAtMillis", state.challenge.createdAtMillis)
             put("deadlineMillis", state.challenge.deadlineMillis)
         })
-
-        val sigArr = JSONArray()
-        state.unlockedFullSignalSymbols.forEach { sigArr.put(it) }
-        obj.put("unlockedFullSignalSymbols", sigArr)
 
         prefs.edit().putString("state_json", obj.toString()).apply()
     }

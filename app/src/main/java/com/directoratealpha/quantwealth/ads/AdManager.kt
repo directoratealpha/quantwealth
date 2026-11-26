@@ -95,7 +95,6 @@ class QuantAdManager(private val context: Context) {
             return
         }
         simRunsCounter++
-        // Show discreetly on every 2nd simulation run
         if (simRunsCounter % 2 != 0) {
             onDone()
             return

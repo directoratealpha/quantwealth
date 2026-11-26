@@ -23,7 +23,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.directoratealpha.quantwealth.engine.QuantEngine
@@ -41,7 +40,7 @@ import kotlin.math.pow
 fun PortfolioScreen(
     portfolio: PortfolioState,
     marketAssets: Map<String, MarketAsset>,
-    pendingQuickTradeAsset: MarketAsset?,
+    pendingQuickTrade: Pair<MarketAsset, TradeSide>?,
     onClearPendingQuickTrade: () -> Unit,
     onOpenPosition: (MarketAsset, TradeSide, Double, Int) -> Unit,
     onClosePosition: (OpenPosition, Double) -> Unit,
@@ -53,17 +52,18 @@ fun PortfolioScreen(
 
     var showTradeSheet by remember { mutableStateOf(false) }
     var selectedTradeAsset by remember { mutableStateOf<MarketAsset?>(null) }
+    var selectedTradeSide by remember { mutableStateOf(TradeSide.LONG) }
     var showEditChallengeDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(pendingQuickTradeAsset) {
-        if (pendingQuickTradeAsset != null) {
-            selectedTradeAsset = pendingQuickTradeAsset
+    LaunchedEffect(pendingQuickTrade) {
+        if (pendingQuickTrade != null) {
+            selectedTradeAsset = pendingQuickTrade.first
+            selectedTradeSide = pendingQuickTrade.second
             showTradeSheet = true
             onClearPendingQuickTrade()
         }
     }
 
-    // Compute live equity
     val allocatedMargin = portfolio.positions.sumOf { it.marginAllocated }
     val totalUnrealizedPnl = portfolio.positions.sumOf { pos ->
         val livePrice = marketAssets[pos.symbol]?.price ?: pos.entryPrice
@@ -73,7 +73,6 @@ fun PortfolioScreen(
     val totalPnlUsd = totalEquity - PortfolioState.INITIAL_CASH
     val totalPnlPct = (totalPnlUsd / PortfolioState.INITIAL_CASH) * 100.0
 
-    // Challenge Math
     val challenge = portfolio.challenge
     val targetEquity = challenge.startEquityUsd + challenge.targetProfitUsd
     val profitTowardGoal = totalEquity - challenge.startEquityUsd
@@ -110,7 +109,6 @@ fun PortfolioScreen(
         contentPadding = PaddingValues(top = 10.dp, bottom = 22.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 1. $100K Account Hero Card (Permanent — No Reset)
         item {
             Box(
                 modifier = Modifier
@@ -190,6 +188,7 @@ fun PortfolioScreen(
                         onClick = {
                             selectedTradeAsset = marketAssets[portfolio.watchlistSymbols.firstOrNull() ?: "BTC-USD"]
                                 ?: marketAssets.values.firstOrNull()
+                            selectedTradeSide = TradeSide.LONG
                             showTradeSheet = true
                         },
                         modifier = Modifier
@@ -215,7 +214,7 @@ fun PortfolioScreen(
             }
         }
 
-        // 2. Profit Target & Deadline Challenge Card + IG Story Share
+        // Profit Target & Deadline Challenge Card
         item {
             val statusColor = when (statusLabel) {
                 "GOAL REACHED", "ON TRACK" -> AppColors.AccentEmerald
@@ -358,7 +357,6 @@ fun PortfolioScreen(
             }
         }
 
-        // 3. Open Positions Header
         item {
             Text(
                 text = "Open Positions (${portfolio.positions.size})",
@@ -378,7 +376,7 @@ fun PortfolioScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "No active positions yet. Tap 'New Trade' above or pick any asset from the Market tab to start trading with $100,000 virtual cash.",
+                        text = "No active positions yet. Search any stock on the Market tab to open its live chart and buy/short, or tap 'New Trade' above.",
                         color = AppColors.TextSecondary,
                         fontSize = 12.5.sp,
                         lineHeight = 18.sp,
@@ -401,7 +399,6 @@ fun PortfolioScreen(
             }
         }
 
-        // 4. Closed / Liquidated History
         if (portfolio.closedTrades.isNotEmpty()) {
             item {
                 Text(
@@ -418,10 +415,17 @@ fun PortfolioScreen(
         }
     }
 
-    // Trade Order Modal Bottom Sheet
     if (showTradeSheet) {
         val asset = selectedTradeAsset ?: marketAssets.values.firstOrNull()
         if (asset != null) {
+            val chipAssets = remember(asset, portfolio.watchlistSymbols, marketAssets) {
+                val list = ArrayList<MarketAsset>()
+                list.add(asset)
+                portfolio.watchlistSymbols.mapNotNull { marketAssets[it] }.forEach { a ->
+                    if (list.none { it.symbol == a.symbol }) list.add(a)
+                }
+                list
+            }
             ModalBottomSheet(
                 onDismissRequest = { showTradeSheet = false },
                 containerColor = AppColors.CardDark,
@@ -429,7 +433,8 @@ fun PortfolioScreen(
             ) {
                 PlaceTradeSheet(
                     initialAsset = asset,
-                    availableAssets = portfolio.watchlistSymbols.mapNotNull { marketAssets[it] },
+                    initialSide = selectedTradeSide,
+                    availableAssets = chipAssets,
                     availableCash = portfolio.cashBalance,
                     isPro = portfolio.isPro,
                     onRequestHighLeverageAd = onRequestHighLeverageAd,
@@ -446,7 +451,6 @@ fun PortfolioScreen(
         }
     }
 
-    // Edit Challenge Dialog
     if (showEditChallengeDialog) {
         EditChallengeDialog(
             currentTargetProfit = challenge.targetProfitUsd,
@@ -630,6 +634,7 @@ private fun ClosedTradeRow(trade: ClosedTrade) {
 @Composable
 private fun PlaceTradeSheet(
     initialAsset: MarketAsset,
+    initialSide: TradeSide,
     availableAssets: List<MarketAsset>,
     availableCash: Double,
     isPro: Boolean,
@@ -638,7 +643,7 @@ private fun PlaceTradeSheet(
     onConfirmTrade: (MarketAsset, TradeSide, Double, Int) -> Unit
 ) {
     var selectedAsset by remember { mutableStateOf(initialAsset) }
-    var side by remember { mutableStateOf(TradeSide.LONG) }
+    var side by remember { mutableStateOf(initialSide) }
     var marginText by remember { mutableStateOf("5000") }
     var leverage by remember { mutableStateOf(1) }
     var unlockedHighLevForTrade by remember { mutableStateOf(false) }
@@ -662,7 +667,6 @@ private fun PlaceTradeSheet(
             fontWeight = FontWeight.ExtraBold
         )
 
-        // Asset Picker Chips
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -690,7 +694,6 @@ private fun PlaceTradeSheet(
             }
         }
 
-        // LONG vs SHORT Toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -720,7 +723,6 @@ private fun PlaceTradeSheet(
             }
         }
 
-        // Margin Input + Quick Presets
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -763,7 +765,6 @@ private fun PlaceTradeSheet(
             }
         }
 
-        // Leverage Picker: 1x-3x FREE | 5x, 10x, 20x PRO or 1 Video Ad
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = "Leverage (1x–3x Free • 5x–20x PRO / 1 Ad)",
@@ -830,7 +831,6 @@ private fun PlaceTradeSheet(
             }
         }
 
-        // Order Summary & Liquidation Price Warning
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = AppColors.BgDeep,

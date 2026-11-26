@@ -61,7 +61,6 @@ fun ProUpgradeDialog(
                 val perks = listOf(
                     "Unlimited live watchlist slots (Stocks, Crypto, Gold)",
                     "Free 5x, 10x & 20x leverage in $100k simulator",
-                    "Full Quant Signals (MACD, Bollinger, SMA 50/200)",
                     "Multi-asset ETF Backtester (up to 5 weighted assets)",
                     "Unlimited 1,000-Run Monte Carlo + Zero Ads forever"
                 )
@@ -87,7 +86,6 @@ fun ProUpgradeDialog(
 
                 Spacer(Modifier.height(4.dp))
 
-                // Lifetime Best Value
                 Button(
                     onClick = onBuyLifetime,
                     modifier = Modifier
@@ -118,7 +116,6 @@ fun ProUpgradeDialog(
                     }
                 }
 
-                // Monthly Option
                 OutlinedButton(
                     onClick = onBuyMonthly,
                     modifier = Modifier

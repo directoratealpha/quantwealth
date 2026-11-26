@@ -30,7 +30,6 @@ object ShareCardGenerator {
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
 
-            // Deep Quant Gradient Background
             val bgPaint = Paint().apply {
                 shader = LinearGradient(
                     0f, 0f, width.toFloat(), height.toFloat(),
@@ -41,7 +40,6 @@ object ShareCardGenerator {
             }
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
 
-            // Subtle Grid Accent
             val gridPaint = Paint().apply {
                 color = Color.parseColor("#1838BDF8")
                 strokeWidth = 2f
@@ -53,7 +51,6 @@ object ShareCardGenerator {
                 canvas.drawLine(0f, y.toFloat(), width.toFloat(), y.toFloat(), gridPaint)
             }
 
-            // Header Brand
             val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#38BDF8")
                 textSize = 44f
@@ -70,7 +67,6 @@ object ShareCardGenerator {
             }
             canvas.drawText("$100K PAPER TRADING CHALLENGE", width / 2f, 275f, subBrandPaint)
 
-            // Main Card Container
             val cardRect = RectF(80f, 380f, width - 80f, 1480f)
             val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#0F172A")
@@ -83,7 +79,6 @@ object ShareCardGenerator {
             canvas.drawRoundRect(cardRect, 48f, 48f, cardPaint)
             canvas.drawRoundRect(cardRect, 48f, 48f, borderPaint)
 
-            // Status Badge
             val isPositive = totalPnlUsd >= 0
             val statusColor = if (statusLabel == "GOAL REACHED" || statusLabel == "ON TRACK") {
                 Color.parseColor("#10B981")
@@ -102,7 +97,6 @@ object ShareCardGenerator {
             }
             canvas.drawText(statusLabel, width / 2f, 503f, pillTextPaint)
 
-            // Equity Label & Value
             val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#94A3B8")
                 textSize = 34f
@@ -131,7 +125,6 @@ object ShareCardGenerator {
                 pnlPaint
             )
 
-            // Progress Bar
             canvas.drawText(
                 "TARGET: ${Formatters.formatUsd(targetEquityUsd)}  •  ${daysLeft}D LEFT",
                 width / 2f,
@@ -168,7 +161,6 @@ object ShareCardGenerator {
             }
             canvas.drawText("Can you beat my virtual portfolio?", width / 2f, 1380f, ctaPaint)
 
-            // Footer Disclaimer
             val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#64748B")
                 textSize = 26f
@@ -177,7 +169,7 @@ object ShareCardGenerator {
             canvas.drawText("QuantWealth: Trading Simulator • Virtual Funds Only", width / 2f, 1740f, footerPaint)
 
             saveAndShareBitmap(context, bitmap, "quantwealth_challenge.png", "My $100K Trading Challenge on QuantWealth!")
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             Toast.makeText(context, "Could not generate share card.", Toast.LENGTH_SHORT).show()
         }
     }
@@ -220,7 +212,6 @@ object ShareCardGenerator {
                 subPaint
             )
 
-            // Card
             val cardRect = RectF(76f, 340f, width - 76f, 1560f)
             val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#0F172A") }
             val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -239,7 +230,6 @@ object ShareCardGenerator {
             }
             canvas.drawText("${result.assetLabel} Projection", width / 2f, 435f, titlePaint)
 
-            // Draw Mini Fan Chart inside (140..940, 500..940)
             val chartLeft = 140f
             val chartRight = 940f
             val chartTop = 510f
@@ -267,7 +257,6 @@ object ShareCardGenerator {
             drawSeries(result.p50Curve, "#38BDF8", 11f)
             drawSeries(result.p10Curve, "#F59E0B", 8f)
 
-            // Outcomes text
             val metricLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#94A3B8")
                 textSize = 30f
@@ -309,7 +298,7 @@ object ShareCardGenerator {
             canvas.drawText("QuantWealth: Trading Simulator • Educational Simulation Only", width / 2f, 1740f, footerPaint)
 
             saveAndShareBitmap(context, bitmap, "quantwealth_montecarlo.png", "My Monte Carlo Wealth Simulation on QuantWealth!")
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             Toast.makeText(context, "Could not generate share card.", Toast.LENGTH_SHORT).show()
         }
     }

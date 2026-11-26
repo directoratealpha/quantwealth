@@ -55,29 +55,27 @@ fun MonteCarloScreen(
     var inflationAdjusted by remember { mutableStateOf(true) }
     var fireTargetUsd by remember { mutableStateOf(500000f) }
 
-    var fullRunUnlockedOnce by remember { mutableStateOf(false) }
+    var fullRunUnlocked by remember { mutableStateOf(false) }
     var showUnlockDialog by remember { mutableStateOf(false) }
+    var manualSeedBump by remember { mutableStateOf(0) }
 
-    var result by remember {
-        mutableStateOf(
-            QuantEngine.runMonteCarlo(
-                assetLabel = selectedPresetLabel,
-                simulationsCount = if (isPro) 1000 else 100,
-                years = years,
-                initialCapital = initialCapital.toDouble(),
-                monthlyDca = monthlyDca.toDouble(),
-                annualReturnPct = annualReturnPct.toDouble(),
-                volatilityPct = volatilityPct.toDouble(),
-                inflationAdjusted = inflationAdjusted,
-                fireTargetUsd = fireTargetUsd.toDouble()
-            )
-        )
-    }
+    val activeSimCount = if (isPro || fullRunUnlocked) 1000 else 100
 
-    fun runSim(simCount: Int) {
-        result = QuantEngine.runMonteCarlo(
+    val result: MonteCarloResult = remember(
+        selectedPresetLabel,
+        activeSimCount,
+        years,
+        initialCapital,
+        monthlyDca,
+        annualReturnPct,
+        volatilityPct,
+        inflationAdjusted,
+        fireTargetUsd,
+        manualSeedBump
+    ) {
+        QuantEngine.runMonteCarlo(
             assetLabel = selectedPresetLabel,
-            simulationsCount = simCount,
+            simulationsCount = activeSimCount,
             years = years,
             initialCapital = initialCapital.toDouble(),
             monthlyDca = monthlyDca.toDouble(),
@@ -111,7 +109,6 @@ fun MonteCarloScreen(
             }
         }
 
-        // Preset Profiles
         item {
             Row(
                 modifier = Modifier
@@ -129,7 +126,6 @@ fun MonteCarloScreen(
                             selectedPresetLabel = preset.label
                             annualReturnPct = preset.muPct
                             volatilityPct = preset.volPct
-                            runSim(if (isPro || fullRunUnlockedOnce) 1000 else 100)
                         }
                     ) {
                         Text(
@@ -146,7 +142,6 @@ fun MonteCarloScreen(
             }
         }
 
-        // Chart & Outcomes Card
         item {
             Surface(
                 shape = RoundedCornerShape(18.dp),
@@ -209,7 +204,6 @@ fun MonteCarloScreen(
                         OutcomeBox("P90 Bull", Formatters.formatCompactUsd(result.p90FinalValue), AppColors.AccentEmerald, Modifier.weight(1f))
                     }
 
-                    // FIRE 4% Rule Banner
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = AppColors.BgDeep,
@@ -247,7 +241,6 @@ fun MonteCarloScreen(
             }
         }
 
-        // Parameter Controls
         item {
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -313,19 +306,19 @@ fun MonteCarloScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { runSim(100) },
+                            onClick = { manualSeedBump++ },
                             modifier = Modifier.weight(0.9f).defaultMinSize(minHeight = 46.dp),
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, AppColors.CardBorder),
                             contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
-                            Text("Preview (100)", color = AppColors.TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            Text("Re-Roll ($activeSimCount)", color = AppColors.TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         Button(
                             onClick = {
-                                if (isPro || fullRunUnlockedOnce) {
-                                    runSim(1000)
+                                if (isPro || fullRunUnlocked) {
+                                    manualSeedBump++
                                 } else {
                                     showUnlockDialog = true
                                 }
@@ -338,7 +331,7 @@ fun MonteCarloScreen(
                             ),
                             contentPadding = PaddingValues(horizontal = 10.dp)
                         ) {
-                            if (!isPro && !fullRunUnlockedOnce) {
+                            if (!isPro && !fullRunUnlocked) {
                                 Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(Modifier.width(5.dp))
                             }
@@ -360,8 +353,8 @@ fun MonteCarloScreen(
             onWatchAd = {
                 showUnlockDialog = false
                 onRequestFullMonteCarloAd {
-                    fullRunUnlockedOnce = true
-                    runSim(1000)
+                    fullRunUnlocked = true
+                    manualSeedBump++
                 }
             },
             onOpenPro = {

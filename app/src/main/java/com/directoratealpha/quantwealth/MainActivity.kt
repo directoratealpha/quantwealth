@@ -103,7 +103,7 @@ private fun QuantWealthAppRoot(
     }
     var isRefreshing by remember { mutableStateOf(false) }
     var showProDialog by remember { mutableStateOf(false) }
-    var pendingQuickTradeAsset by remember { mutableStateOf<MarketAsset?>(null) }
+    var pendingQuickTrade by remember { mutableStateOf<Pair<MarketAsset, TradeSide>?>(null) }
 
     val monthlyPrice by billingManager.monthlyPrice.collectAsState()
     val lifetimePrice by billingManager.lifetimePrice.collectAsState()
@@ -114,14 +114,12 @@ private fun QuantWealthAppRoot(
         storage.save(next)
     }
 
-    // Sync Google Play Billing PRO state
     LaunchedEffect(externalProStatus) {
         if (externalProStatus && !portfolio.isPro) {
             updatePortfolio { it.copy(isPro = true) }
         }
     }
 
-    // Check automatic Isolated Margin Liquidations on every price refresh
     fun checkLiquidations(latestAssets: Map<String, MarketAsset>) {
         if (portfolio.positions.isEmpty()) return
         val surviving = ArrayList<OpenPosition>()
@@ -172,7 +170,6 @@ private fun QuantWealthAppRoot(
         isRefreshing = false
     }
 
-    // Live polling loop every 12 seconds while app is open
     LaunchedEffect(portfolio.watchlistSymbols) {
         while (true) {
             refreshMarketQuotes()
@@ -191,7 +188,6 @@ private fun QuantWealthAppRoot(
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Brand + Live Indicator + PRO Pill
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -283,7 +279,6 @@ private fun QuantWealthAppRoot(
                     }
                 }
 
-                // 4-Tab Pill Bar synced with HorizontalPager Swipe
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -336,22 +331,22 @@ private fun QuantWealthAppRoot(
                     marketAssets = marketAssets,
                     isRefreshing = isRefreshing,
                     onManualRefresh = { scope.launch { refreshMarketQuotes() } },
-                    onAddTicker = { rawSym ->
+                    onCacheFetchedAsset = { asset ->
+                        marketAssets = marketAssets + (asset.symbol to asset)
+                    },
+                    onAddWatchlistSymbol = { rawSym ->
                         val sym = rawSym.trim().uppercase()
-                        if (portfolio.watchlistSymbols.contains(sym)) {
-                            Toast.makeText(activity, "$sym is already in your watchlist.", Toast.LENGTH_SHORT).show()
-                        } else if (!portfolio.isPro && portfolio.watchlistSymbols.size >= portfolio.maxWatchlistSlots) {
-                            Toast.makeText(activity, "Watchlist slot limit reached.", Toast.LENGTH_SHORT).show()
-                        } else {
+                        if (!portfolio.watchlistSymbols.contains(sym)) {
                             updatePortfolio { it.copy(watchlistSymbols = it.watchlistSymbols + sym) }
-                            marketAssets = marketAssets + (sym to MarketRepository.createFallbackAsset(sym))
                             scope.launch {
                                 val live = MarketRepository.fetchSingleLiveAsset(sym, marketAssets[sym])
-                                marketAssets = marketAssets + (sym to live)
+                                if (live != null) {
+                                    marketAssets = marketAssets + (sym to live)
+                                }
                             }
                         }
                     },
-                    onRemoveTicker = { sym ->
+                    onRemoveWatchlistSymbol = { sym ->
                         if (portfolio.watchlistSymbols.size > 1) {
                             updatePortfolio { it.copy(watchlistSymbols = it.watchlistSymbols.filterNot { s -> s == sym }) }
                         }
@@ -366,18 +361,10 @@ private fun QuantWealthAppRoot(
                             }
                         )
                     },
-                    onUnlockFullSignal = { sym ->
-                        adManager.showRewardedAd(
-                            activity = activity,
-                            isPro = portfolio.isPro,
-                            onRewardEarned = {
-                                updatePortfolio { it.copy(unlockedFullSignalSymbols = it.unlockedFullSignalSymbols + sym) }
-                            }
-                        )
-                    },
                     onOpenProDialog = { showProDialog = true },
-                    onQuickTradeAsset = { asset ->
-                        pendingQuickTradeAsset = asset
+                    onQuickTradeAsset = { asset, side ->
+                        marketAssets = marketAssets + (asset.symbol to asset)
+                        pendingQuickTrade = asset to side
                         scope.launch { pagerState.animateScrollToPage(1) }
                     }
                 )
@@ -385,8 +372,8 @@ private fun QuantWealthAppRoot(
                 1 -> PortfolioScreen(
                     portfolio = portfolio,
                     marketAssets = marketAssets,
-                    pendingQuickTradeAsset = pendingQuickTradeAsset,
-                    onClearPendingQuickTrade = { pendingQuickTradeAsset = null },
+                    pendingQuickTrade = pendingQuickTrade,
+                    onClearPendingQuickTrade = { pendingQuickTrade = null },
                     onOpenPosition = { asset, side, margin, lev ->
                         if (margin <= portfolio.cashBalance && margin >= 10.0) {
                             val liq = QuantEngine.computeLiquidationPrice(asset.price, lev, side)
@@ -402,6 +389,7 @@ private fun QuantWealthAppRoot(
                                 liquidationPrice = liq,
                                 openedAtMillis = System.currentTimeMillis()
                             )
+                            marketAssets = marketAssets + (asset.symbol to asset)
                             updatePortfolio {
                                 it.copy(
                                     cashBalance = (it.cashBalance - margin).coerceAtLeast(0.0),
@@ -476,9 +464,6 @@ private fun QuantWealthAppRoot(
                             isPro = portfolio.isPro,
                             onRewardEarned = onUnlocked
                         )
-                    },
-                    onRunWithPossibleInterstitial = { onProceed ->
-                        adManager.maybeShowSimulationInterstitial(activity, portfolio.isPro, onProceed)
                     },
                     onOpenProDialog = { showProDialog = true }
                 )

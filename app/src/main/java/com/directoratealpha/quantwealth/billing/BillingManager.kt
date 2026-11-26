@@ -47,9 +47,7 @@ class BillingManager(
                 }
             }
 
-            override fun onBillingServiceDisconnected() {
-                // Reconnects automatically on next purchase attempt
-            }
+            override fun onBillingServiceDisconnected() {}
         })
     }
 

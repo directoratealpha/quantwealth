@@ -7,6 +7,32 @@ enum class AssetCategory(val label: String) {
     GOLD_MACRO("Gold & Macro")
 }
 
+enum class ChartTimeframe(
+    val label: String,
+    val yahooRange: String,
+    val yahooInterval: String
+) {
+    D1("1D", "1d", "5m"),
+    W1("1W", "5d", "30m"),
+    M1("1M", "1mo", "1d"),
+    M3("3M", "3mo", "1d"),
+    Y1("1Y", "1y", "1d"),
+    Y5("5Y", "5y", "1wk")
+}
+
+data class ChartPoint(
+    val timestampSec: Long,
+    val price: Double
+)
+
+data class TickerSearchResult(
+    val symbol: String,
+    val displaySymbol: String,
+    val name: String,
+    val exchange: String,
+    val category: AssetCategory
+)
+
 enum class SignalLabel(val label: String) {
     STRONG_BUY("STRONG BUY"),
     BUY("BUY"),
@@ -92,14 +118,13 @@ data class PortfolioState(
     val watchlistSymbols: List<String> = DEFAULT_WATCHLIST,
     val maxWatchlistSlots: Int = 10,
     val challenge: ProfitChallenge = ProfitChallenge(),
-    val isPro: Boolean = false,
-    val unlockedFullSignalSymbols: Set<String> = emptySet()
+    val isPro: Boolean = false
 ) {
     companion object {
         const val INITIAL_CASH = 100000.0
+        // 5 starter assets so user immediately has 5 free open watchlist slots ready!
         val DEFAULT_WATCHLIST = listOf(
-            "SPY", "QQQ", "NVDA", "GOOGL", "TSLA",
-            "BTC-USD", "ETH-USD", "SOL-USD", "GC=F", "CL=F"
+            "SPY", "NVDA", "PLTR", "BTC-USD", "GC=F"
         )
     }
 }

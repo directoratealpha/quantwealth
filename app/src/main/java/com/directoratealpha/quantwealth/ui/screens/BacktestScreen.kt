@@ -24,7 +24,6 @@ import com.directoratealpha.quantwealth.ui.components.BacktestEquityChart
 import com.directoratealpha.quantwealth.ui.components.UnlockFeatureDialog
 import com.directoratealpha.quantwealth.ui.theme.AppColors
 import com.directoratealpha.quantwealth.ui.theme.Formatters
-import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -32,11 +31,9 @@ import kotlin.math.roundToInt
 fun BacktestScreen(
     isPro: Boolean,
     onRequestMultiAssetAd: (onUnlocked: () -> Unit) -> Unit,
-    onRunWithPossibleInterstitial: (onProceed: () -> Unit) -> Unit,
     onOpenProDialog: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-    val presetSymbols = remember { listOf("SPY", "QQQ", "NVDA", "GOOGL", "SCHD", "GLD", "BTC-USD") }
+    val presetSymbols = remember { listOf("SPY", "QQQ", "NVDA", "PLTR", "GOOGL", "SCHD", "GLD", "BTC-USD") }
 
     var selectedWeights by remember { mutableStateOf(listOf(BacktestAssetWeight("SPY", 100))) }
     var multiAssetUnlocked by remember { mutableStateOf(false) }
@@ -47,40 +44,50 @@ fun BacktestScreen(
     var years by remember { mutableStateOf(10) }
     var dripEnabled by remember { mutableStateOf(true) }
 
-    var isRunning by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<BacktestResult?>(null) }
+    var cachedSeriesMap by remember { mutableStateOf<Map<String, List<Double>>>(emptyMap()) }
+    var allLiveData by remember { mutableStateOf(true) }
+    var isFetchingHistory by remember { mutableStateOf(false) }
 
-    fun executeBacktest() {
-        scope.launch {
-            isRunning = true
-            val historyMap = HashMap<String, List<Double>>()
-            val divMap = HashMap<String, Double>()
-            var allLive = true
-
-            for (item in selectedWeights) {
-                val (series, live) = MarketRepository.fetchMonthlyHistory(item.symbol, years)
-                historyMap[item.symbol] = series
-                if (!live) allLive = false
-                val seed = MarketRepository.catalog.firstOrNull { it.symbol == item.symbol }
-                divMap[item.symbol] = seed?.dividendYieldPct ?: 0.0
-            }
-
-            result = QuantEngine.runBacktest(
-                weights = selectedWeights,
-                monthlySeriesMap = historyMap,
-                dividendYieldsMap = divMap,
-                initialCapital = initialCapital.toDouble(),
-                monthlyDca = monthlyDca.toDouble(),
-                years = years,
-                dripEnabled = dripEnabled,
-                usedLiveData = allLive
-            )
-            isRunning = false
+    // Fetch historical prices whenever selected tickers or horizon changes
+    LaunchedEffect(selectedWeights, years) {
+        isFetchingHistory = true
+        val historyMap = HashMap<String, List<Double>>()
+        var liveFlag = true
+        for (item in selectedWeights) {
+            val (series, live) = MarketRepository.fetchMonthlyHistory(item.symbol, years)
+            historyMap[item.symbol] = series
+            if (!live) liveFlag = false
         }
+        cachedSeriesMap = historyMap
+        allLiveData = liveFlag
+        isFetchingHistory = false
     }
 
-    LaunchedEffect(Unit) {
-        executeBacktest()
+    // Recompute backtest instantaneously whenever sliders, DRIP, or fetched history updates
+    val result: BacktestResult? = remember(
+        selectedWeights,
+        cachedSeriesMap,
+        initialCapital,
+        monthlyDca,
+        years,
+        dripEnabled,
+        allLiveData
+    ) {
+        if (cachedSeriesMap.isEmpty()) return@remember null
+        val divMap = selectedWeights.associate { item ->
+            val seed = MarketRepository.catalog.firstOrNull { it.symbol == item.symbol }
+            item.symbol to (seed?.dividendYieldPct ?: 0.0)
+        }
+        QuantEngine.runBacktest(
+            weights = selectedWeights,
+            monthlySeriesMap = cachedSeriesMap,
+            dividendYieldsMap = divMap,
+            initialCapital = initialCapital.toDouble(),
+            monthlyDca = monthlyDca.toDouble(),
+            years = years,
+            dripEnabled = dripEnabled,
+            usedLiveData = allLiveData
+        )
     }
 
     LazyColumn(
@@ -91,22 +98,126 @@ fun BacktestScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Column {
-                Text(
-                    text = "Real Historical ETF Backtester",
-                    color = AppColors.TextPrimary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(
-                    text = "Test DCA + DRIP on real market history with CAGR, Max Drawdown & Sharpe Ratio",
-                    color = AppColors.TextSecondary,
-                    fontSize = 11.5.sp
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Real Historical ETF Backtester",
+                        color = AppColors.TextPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        text = "Drag sliders to simulate DCA + DRIP on real historical prices",
+                        color = AppColors.TextSecondary,
+                        fontSize = 11.5.sp
+                    )
+                }
+                if (isFetchingHistory) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = AppColors.AccentCyan
+                    )
+                }
             }
         }
 
-        // Asset Basket Selection
+        // Results Chart & Quant Metrics (Placed right at top so you see live slider changes!)
+        val res = result
+        if (res != null) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = AppColors.CardDark,
+                    border = BorderStroke(1.dp, AppColors.AccentEmerald.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "${res.symbolsLabel} (${res.years}Y)",
+                                    color = AppColors.AccentCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = Formatters.formatUsd(res.finalValue),
+                                    color = AppColors.TextPrimary,
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (res.usedLiveData) AppColors.AccentEmerald.copy(alpha = 0.16f) else AppColors.AccentGold.copy(alpha = 0.16f)
+                            ) {
+                                Text(
+                                    text = if (res.usedLiveData) "LIVE HISTORY" else "MODEL DATA",
+                                    color = if (res.usedLiveData) AppColors.AccentEmerald else AppColors.AccentGold,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        BacktestEquityChart(
+                            portfolioCurve = res.portfolioCurve,
+                            investedCurve = res.investedCurve,
+                            height = 175.dp
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Green: Portfolio Value", color = AppColors.AccentEmerald, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Dashed: Invested (${Formatters.formatCompactUsd(res.totalInvested)})", color = AppColors.AccentCyan, fontSize = 11.sp)
+                        }
+
+                        HorizontalDivider(color = AppColors.CardBorder)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            QuantMetricBox(
+                                label = "CAGR / yr",
+                                value = Formatters.formatPct(res.cagrPct),
+                                valueColor = if (res.cagrPct >= 0) AppColors.AccentEmerald else AppColors.AccentRed,
+                                modifier = Modifier.weight(1f)
+                            )
+                            QuantMetricBox(
+                                label = "Max Drawdown",
+                                value = String.format(Locale.US, "-%.1f%%", res.maxDrawdownPct),
+                                valueColor = AppColors.AccentRed,
+                                modifier = Modifier.weight(1f)
+                            )
+                            QuantMetricBox(
+                                label = "Sharpe Ratio",
+                                value = String.format(Locale.US, "%.2f", res.sharpeRatio),
+                                valueColor = if (res.sharpeRatio >= 1.0) AppColors.AccentCyan else AppColors.AccentGold,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Asset Basket & Sliders
         item {
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -166,7 +277,6 @@ fun BacktestScreen(
                                                 selectedWeights = updated.map { it.copy(weightPct = equalW) }
                                             }
                                         } else {
-                                            // Single asset free swap vs multi-asset unlock
                                             selectedWeights = listOf(BacktestAssetWeight(sym, 100))
                                         }
                                     }
@@ -206,7 +316,6 @@ fun BacktestScreen(
                         }
                     }
 
-                    // Initial Capital Slider
                     Column {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Initial Investment", color = AppColors.TextSecondary, fontSize = 12.sp)
@@ -220,7 +329,6 @@ fun BacktestScreen(
                         )
                     }
 
-                    // Monthly DCA Slider
                     Column {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Monthly Contribution (DCA)", color = AppColors.TextSecondary, fontSize = 12.sp)
@@ -234,7 +342,6 @@ fun BacktestScreen(
                         )
                     }
 
-                    // Horizon + DRIP Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -266,118 +373,6 @@ fun BacktestScreen(
                                 checked = dripEnabled,
                                 onCheckedChange = { dripEnabled = it },
                                 colors = SwitchDefaults.colors(checkedThumbColor = AppColors.BgDeep, checkedTrackColor = AppColors.AccentEmerald)
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = { onRunWithPossibleInterstitial { executeBacktest() } },
-                        enabled = !isRunning,
-                        modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 46.dp),
-                        shape = RoundedCornerShape(13.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AppColors.AccentCyan,
-                            contentColor = AppColors.BgDeep
-                        )
-                    ) {
-                        if (isRunning) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = AppColors.BgDeep)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Fetching Market History...", fontWeight = FontWeight.ExtraBold)
-                        } else {
-                            Icon(Icons.Rounded.Timeline, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Run Historical Backtest", fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Results Chart & Quant Metrics
-        val res = result
-        if (res != null) {
-            item {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = AppColors.CardDark,
-                    border = BorderStroke(1.dp, AppColors.AccentEmerald.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    text = "${res.symbolsLabel} (${res.years}Y)",
-                                    color = AppColors.AccentCyan,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = Formatters.formatUsd(res.finalValue),
-                                    color = AppColors.TextPrimary,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (res.usedLiveData) AppColors.AccentEmerald.copy(alpha = 0.16f) else AppColors.AccentGold.copy(alpha = 0.16f)
-                            ) {
-                                Text(
-                                    text = if (res.usedLiveData) "LIVE HISTORY" else "OFFLINE MODEL",
-                                    color = if (res.usedLiveData) AppColors.AccentEmerald else AppColors.AccentGold,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-
-                        BacktestEquityChart(
-                            portfolioCurve = res.portfolioCurve,
-                            investedCurve = res.investedCurve
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Green: Portfolio Value", color = AppColors.AccentEmerald, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Dashed: Total Invested (${Formatters.formatCompactUsd(res.totalInvested)})", color = AppColors.AccentCyan, fontSize = 11.sp)
-                        }
-
-                        HorizontalDivider(color = AppColors.CardBorder)
-
-                        // Institutional Quant Grid
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            QuantMetricBox(
-                                label = "CAGR / yr",
-                                value = Formatters.formatPct(res.cagrPct),
-                                valueColor = if (res.cagrPct >= 0) AppColors.AccentEmerald else AppColors.AccentRed,
-                                modifier = Modifier.weight(1f)
-                            )
-                            QuantMetricBox(
-                                label = "Max Drawdown",
-                                value = String.format(Locale.US, "-%.1f%%", res.maxDrawdownPct),
-                                valueColor = AppColors.AccentRed,
-                                modifier = Modifier.weight(1f)
-                            )
-                            QuantMetricBox(
-                                label = "Sharpe Ratio",
-                                value = String.format(Locale.US, "%.2f", res.sharpeRatio),
-                                valueColor = if (res.sharpeRatio >= 1.0) AppColors.AccentCyan else AppColors.AccentGold,
-                                modifier = Modifier.weight(1f)
                             )
                         }
                     }

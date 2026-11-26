@@ -6,10 +6,6 @@ import kotlin.random.Random
 
 object QuantEngine {
 
-    /**
-     * Computes real quantitative technical indicators from daily closing prices:
-     * RSI (14), SMA 50 & SMA 200, MACD (12, 26, 9), Bollinger Bands (20, 2σ).
-     */
     fun calculateTechnicalSignal(closes: List<Double>): TechnicalSignal {
         if (closes.size < 15) {
             val last = closes.lastOrNull() ?: 100.0
@@ -51,10 +47,8 @@ object QuantEngine {
         val bbUpper = bbMid + 2.0 * stdDev
         val bbLower = (bbMid - 2.0 * stdDev).coerceAtLeast(0.0001)
 
-        // Composite Quant Score (0 to 100)
         var score = 50.0
 
-        // 1. RSI Momentum / Mean Reversion (+/- 22 pts)
         score += when {
             rsi14 < 28.0 -> 22.0
             rsi14 < 38.0 -> 14.0
@@ -64,11 +58,9 @@ object QuantEngine {
             else -> -20.0
         }
 
-        // 2. Trend Structure: SMA 50 vs SMA 200 & Price vs SMA 50 (+/- 16 pts)
         if (sma50 > sma200) score += 8.0 else score -= 7.0
         if (currentPrice > sma50) score += 6.0 else score -= 5.0
 
-        // 3. MACD Momentum (+/- 12 pts)
         score += when {
             macdHistogram > 0 && macdLine > macdSignal -> 10.0
             macdHistogram > 0 -> 5.0
@@ -76,7 +68,6 @@ object QuantEngine {
             else -> -4.0
         }
 
-        // 4. Bollinger Band Position (+/- 10 pts)
         val bandWidth = (bbUpper - bbLower).coerceAtLeast(0.0001)
         val pctB = (currentPrice - bbLower) / bandWidth
         score += when {
@@ -141,8 +132,6 @@ object QuantEngine {
 
     private fun computeRsi(values: List<Double>, period: Int): Double {
         if (values.size <= period) return 50.0
-        var avgGain = 0.0
-        var avgLoss = 0.0
         val start = values.size - period - 1
         val initialStart = max(1, start - period)
 
@@ -154,8 +143,8 @@ object QuantEngine {
             if (diff >= 0) initGains += diff else initLosses += abs(diff)
             count++
         }
-        avgGain = if (count > 0) initGains / count else 0.0
-        avgLoss = if (count > 0) initLosses / count else 0.0
+        var avgGain = if (count > 0) initGains / count else 0.0
+        var avgLoss = if (count > 0) initLosses / count else 0.0
 
         for (i in min(initialStart + period, values.size) until values.size) {
             val diff = values[i] - values[i - 1]
@@ -170,10 +159,6 @@ object QuantEngine {
         return 100.0 - (100.0 / (1.0 + rs))
     }
 
-    /**
-     * Isolated Margin Liquidation Price (includes 5% maintenance buffer).
-     * 1x LONG cannot liquidate (0.0); 10x LONG liquidates at ~9.5% drop; 20x at ~4.75% drop.
-     */
     fun computeLiquidationPrice(entryPrice: Double, leverage: Int, side: TradeSide): Double {
         if (leverage <= 1 && side == TradeSide.LONG) return 0.0
         val maintenanceFactor = 0.95 / leverage.toDouble()
@@ -188,7 +173,6 @@ object QuantEngine {
         val priceMovePct = (currentPrice - position.entryPrice) / position.entryPrice
         val directionalPct = if (position.side == TradeSide.LONG) priceMovePct else -priceMovePct
         val rawPnl = position.marginAllocated * position.leverage.toDouble() * directionalPct
-        // Isolated margin caps max loss at -marginAllocated
         return rawPnl.coerceAtLeast(-position.marginAllocated)
     }
 
@@ -200,9 +184,6 @@ object QuantEngine {
         }
     }
 
-    /**
-     * Portfolio Backtester supporting 1 to 5 weighted assets, DCA, DRIP, CAGR, Max Drawdown & Sharpe.
-     */
     fun runBacktest(
         weights: List<BacktestAssetWeight>,
         monthlySeriesMap: Map<String, List<Double>>,
@@ -216,14 +197,12 @@ object QuantEngine {
         val totalWeight = weights.sumOf { it.weightPct }.coerceAtLeast(1)
         val normWeights = weights.map { it.symbol to (it.weightPct.toDouble() / totalWeight.toDouble()) }
 
-        // Determine common number of monthly return steps
         val targetMonths = years * 12
         val availableMonths = normWeights.minOfOrNull { (sym, _) ->
             (monthlySeriesMap[sym]?.size ?: 2) - 1
         }?.coerceAtLeast(1) ?: 1
         val months = min(targetMonths, availableMonths)
 
-        // Precompute monthly returns for each symbol over the last `months` steps
         val symbolMonthlyReturns = normWeights.associate { (sym, _) ->
             val series = monthlySeriesMap[sym].orEmpty()
             val slice = if (series.size >= months + 1) series.takeLast(months + 1) else series
@@ -272,13 +251,10 @@ object QuantEngine {
         }
 
         val totalReturnPct = if (totalInvested > 0.0) ((currentValue - totalInvested) / totalInvested) * 100.0 else 0.0
-
-        // Annualized time-weighted CAGR from monthly portfolio returns
         val compoundedFactor = periodicReturns.fold(1.0) { acc, r -> acc * (1.0 + r).coerceAtLeast(0.05) }
         val actualYears = (months.toDouble() / 12.0).coerceAtLeast(0.25)
         val cagrPct = (compoundedFactor.pow(1.0 / actualYears) - 1.0) * 100.0
 
-        // Annualized Sharpe Ratio (Risk-free rate = 4.0% / yr)
         val rfMonthly = 0.04 / 12.0
         val excessReturns = periodicReturns.map { it - rfMonthly }
         val meanExcess = if (excessReturns.isNotEmpty()) excessReturns.average() else 0.0
@@ -310,10 +286,6 @@ object QuantEngine {
         )
     }
 
-    /**
-     * Institutional Monte Carlo Engine using Geometric Brownian Motion (Box-Muller Gaussian).
-     * Runs 100 (free preview) or 1,000 trajectories locally in <100ms.
-     */
     fun runMonteCarlo(
         assetLabel: String,
         simulationsCount: Int,

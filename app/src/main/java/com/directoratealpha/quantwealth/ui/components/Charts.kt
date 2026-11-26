@@ -1,21 +1,21 @@
 package com.directoratealpha.quantwealth.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.directoratealpha.quantwealth.model.ChartPoint
 import com.directoratealpha.quantwealth.ui.theme.AppColors
+import kotlin.math.roundToInt
 
 @Composable
 fun MiniSparkline(
@@ -65,6 +65,146 @@ fun MiniSparkline(
 }
 
 @Composable
+fun InteractiveAssetPriceChart(
+    points: List<ChartPoint>,
+    isPositive: Boolean,
+    onScrubPointChanged: (ChartPoint?) -> Unit,
+    height: Dp = 210.dp
+) {
+    val lineColor = if (isPositive) AppColors.AccentEmerald else AppColors.AccentRed
+    var scrubbedIndex by remember(points) { mutableStateOf<Int?>(null) }
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .pointerInput(points) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        if (points.size >= 2 && size.width > 0) {
+                            val idx = ((offset.x / size.width.toFloat()) * (points.size - 1))
+                                .roundToInt()
+                                .coerceIn(0, points.size - 1)
+                            scrubbedIndex = idx
+                            onScrubPointChanged(points[idx])
+                            tryAwaitRelease()
+                            scrubbedIndex = null
+                            onScrubPointChanged(null)
+                        }
+                    }
+                )
+            }
+            .pointerInput(points) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        if (points.size >= 2 && size.width > 0) {
+                            val idx = ((offset.x / size.width.toFloat()) * (points.size - 1))
+                                .roundToInt()
+                                .coerceIn(0, points.size - 1)
+                            scrubbedIndex = idx
+                            onScrubPointChanged(points[idx])
+                        }
+                    },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        if (points.size >= 2 && size.width > 0) {
+                            val idx = ((change.position.x / size.width.toFloat()) * (points.size - 1))
+                                .roundToInt()
+                                .coerceIn(0, points.size - 1)
+                            scrubbedIndex = idx
+                            onScrubPointChanged(points[idx])
+                        }
+                    },
+                    onDragEnd = {
+                        scrubbedIndex = null
+                        onScrubPointChanged(null)
+                    },
+                    onDragCancel = {
+                        scrubbedIndex = null
+                        onScrubPointChanged(null)
+                    }
+                )
+            }
+    ) {
+        if (points.size < 2) return@Canvas
+
+        val minVal = points.minOf { it.price }
+        val maxVal = points.maxOf { it.price }
+        val range = (maxVal - minVal).takeIf { it > 1e-9 } ?: 1.0
+
+        // Horizontal reference grid
+        for (i in 0..3) {
+            val y = size.height * (i / 3f)
+            drawLine(
+                color = AppColors.CardBorder.copy(alpha = 0.55f),
+                start = Offset(0f, y),
+                end = Offset(size.width, y),
+                strokeWidth = 1.5f
+            )
+        }
+
+        val stepX = size.width / (points.size - 1).toFloat()
+        val linePath = Path()
+        val fillPath = Path()
+        val coords = ArrayList<Offset>(points.size)
+
+        points.forEachIndexed { idx, pt ->
+            val x = idx * stepX
+            val norm = ((pt.price - minVal) / range).toFloat()
+            val y = size.height - (norm * (size.height - 22f)) - 11f
+            coords.add(Offset(x, y))
+            if (idx == 0) {
+                linePath.moveTo(x, y)
+                fillPath.moveTo(x, size.height)
+                fillPath.lineTo(x, y)
+            } else {
+                linePath.lineTo(x, y)
+                fillPath.lineTo(x, y)
+            }
+        }
+        fillPath.lineTo(size.width, size.height)
+        fillPath.close()
+
+        drawPath(
+            path = fillPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(lineColor.copy(alpha = 0.32f), Color.Transparent)
+            )
+        )
+        drawPath(
+            path = linePath,
+            color = lineColor,
+            style = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Live endpoint dot or scrubbed crosshair
+        val activeIdx = scrubbedIndex ?: (coords.size - 1)
+        val activeCoord = coords[activeIdx]
+
+        if (scrubbedIndex != null) {
+            drawLine(
+                color = AppColors.AccentCyan.copy(alpha = 0.75f),
+                start = Offset(activeCoord.x, 0f),
+                end = Offset(activeCoord.x, size.height),
+                strokeWidth = 2.5f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+            )
+        }
+
+        drawCircle(
+            color = lineColor.copy(alpha = 0.30f),
+            radius = 15f,
+            center = activeCoord
+        )
+        drawCircle(
+            color = lineColor,
+            radius = 7.5f,
+            center = activeCoord
+        )
+    }
+}
+
+@Composable
 fun BacktestEquityChart(
     portfolioCurve: List<Double>,
     investedCurve: List<Double>,
@@ -87,7 +227,6 @@ fun BacktestEquityChart(
         ) * 0.92
         val range = (allMax - allMin).coerceAtLeast(1.0)
 
-        // Subtle horizontal grid lines
         for (i in 0..3) {
             val y = size.height * (i / 3f)
             drawLine(
@@ -99,8 +238,6 @@ fun BacktestEquityChart(
         }
 
         val stepX = size.width / (portfolioCurve.size - 1).toFloat()
-
-        // Portfolio value curve + gradient fill
         val portPath = Path()
         val fillPath = Path()
         portfolioCurve.forEachIndexed { idx, value ->
@@ -130,7 +267,6 @@ fun BacktestEquityChart(
             style = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
 
-        // Invested capital dashed line
         val invPath = Path()
         investedCurve.forEachIndexed { idx, value ->
             val x = idx * stepX
@@ -183,7 +319,6 @@ fun MonteCarloFanChart(
             return size.height - (((v - minVal) / range).toFloat() * (size.height - 16f)) - 8f
         }
 
-        // Shaded fan cone between P90 and P10
         val fanPath = Path()
         for (i in 0 until count) {
             val x = i * stepX

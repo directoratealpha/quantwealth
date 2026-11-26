@@ -1,5 +1,6 @@
 package com.directoratealpha.quantwealth.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,17 +19,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.directoratealpha.quantwealth.data.MarketRepository
 import com.directoratealpha.quantwealth.model.*
+import com.directoratealpha.quantwealth.ui.components.AssetDetailChartSheet
 import com.directoratealpha.quantwealth.ui.components.MiniSparkline
 import com.directoratealpha.quantwealth.ui.components.UnlockFeatureDialog
 import com.directoratealpha.quantwealth.ui.theme.AppColors
 import com.directoratealpha.quantwealth.ui.theme.Formatters
-import java.util.Locale
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,19 +41,67 @@ fun MarketScreen(
     marketAssets: Map<String, MarketAsset>,
     isRefreshing: Boolean,
     onManualRefresh: () -> Unit,
-    onAddTicker: (String) -> Unit,
-    onRemoveTicker: (String) -> Unit,
+    onCacheFetchedAsset: (MarketAsset) -> Unit,
+    onAddWatchlistSymbol: (String) -> Unit,
+    onRemoveWatchlistSymbol: (String) -> Unit,
     onUnlockExtraSlot: () -> Unit,
-    onUnlockFullSignal: (String) -> Unit,
     onOpenProDialog: () -> Unit,
-    onQuickTradeAsset: (MarketAsset) -> Unit
+    onQuickTradeAsset: (MarketAsset, TradeSide) -> Unit
 ) {
-    var selectedCategory by remember { mutableStateOf(AssetCategory.ALL) }
-    var showAddTickerDialog by remember { mutableStateOf(false) }
-    var showSlotUnlockDialog by remember { mutableStateOf(false) }
-    var inspectedSymbol by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    val orderedAssets = remember(portfolio.watchlistSymbols, marketAssets, selectedCategory) {
+    var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<TickerSearchResult>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+    var isLoadingSelectedAsset by remember { mutableStateOf(false) }
+
+    var selectedCategory by remember { mutableStateOf(AssetCategory.ALL) }
+    var showSlotUnlockDialog by remember { mutableStateOf(false) }
+    var inspectedAsset by remember { mutableStateOf<MarketAsset?>(null) }
+
+    // Live debounced Yahoo Finance global search as the user types
+    LaunchedEffect(searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) {
+            searchResults = emptyList()
+            isSearching = false
+            return@LaunchedEffect
+        }
+        searchResults = MarketRepository.searchCatalogLocally(q)
+        isSearching = true
+        delay(280L)
+        searchResults = MarketRepository.searchTickersLive(q)
+        isSearching = false
+    }
+
+    fun openChartForSearchItem(item: TickerSearchResult) {
+        val cached = marketAssets[item.symbol]
+        if (cached != null) {
+            inspectedAsset = cached
+            return
+        }
+        scope.launch {
+            isLoadingSelectedAsset = true
+            val fetched = MarketRepository.fetchSingleLiveAsset(
+                rawSymbol = item.symbol,
+                hintName = item.name
+            )
+            isLoadingSelectedAsset = false
+            if (fetched != null) {
+                onCacheFetchedAsset(fetched)
+                inspectedAsset = fetched
+            } else {
+                Toast.makeText(
+                    context,
+                    "No live market data found for ${item.symbol}. Try selecting a suggested ticker.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    val orderedWatchlist = remember(portfolio.watchlistSymbols, marketAssets, selectedCategory) {
         portfolio.watchlistSymbols.mapNotNull { sym -> marketAssets[sym] }.filter { asset ->
             selectedCategory == AssetCategory.ALL || asset.category == selectedCategory
         }
@@ -62,161 +114,259 @@ fun MarketScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 14.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 20.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 22.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Watchlist Header + Slot Counter + Add Button
+        // 1. Prominent Global Search Bar (Search ANY Stock, ETF, Crypto, Gold worldwide)
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = {
                     Text(
-                        text = "Live Market & Quant Signals",
-                        color = AppColors.TextPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        text = "Search any stock, crypto, gold (e.g. PLTR, AAPL, BTC)...",
+                        color = AppColors.TextMuted,
+                        fontSize = 12.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = if (portfolio.isPro) {
-                            "$usedSlots tracked • Unlimited PRO slots"
-                        } else {
-                            "Watchlist slots: $usedSlots / $maxSlots (+1 per video ad)"
-                        },
-                        color = AppColors.TextSecondary,
-                        fontSize = 11.5.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = "Search",
+                        tint = AppColors.AccentCyan
                     )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    IconButton(
-                        onClick = onManualRefresh,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(AppColors.CardDark)
-                            .border(1.dp, AppColors.CardBorder, RoundedCornerShape(10.dp))
-                    ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = AppColors.AccentCyan
-                            )
-                        } else {
+                },
+                trailingIcon = {
+                    if (isSearching || isLoadingSelectedAsset) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = AppColors.AccentCyan
+                        )
+                    } else if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
                             Icon(
-                                imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "Refresh",
-                                tint = AppColors.AccentCyan,
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Clear",
+                                tint = AppColors.TextSecondary
                             )
                         }
                     }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = AppColors.CardDark,
+                    unfocusedContainerColor = AppColors.CardDark,
+                    focusedBorderColor = AppColors.AccentCyan,
+                    unfocusedBorderColor = AppColors.CardBorder,
+                    focusedTextColor = AppColors.TextPrimary,
+                    unfocusedTextColor = AppColors.TextPrimary
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
+        // 2. If User is Searching: Show Live Global Search Results (Tap to open full chart immediately!)
+        if (searchQuery.trim().isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Global Market Results (${searchResults.size})",
                         color = AppColors.AccentCyan,
-                        modifier = Modifier.clickable {
-                            if (portfolio.isPro || usedSlots < maxSlots) {
-                                showAddTickerDialog = true
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Tap any result to open live chart",
+                        color = AppColors.TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            if (searchResults.isEmpty() && !isSearching) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = AppColors.CardDark,
+                        border = BorderStroke(1.dp, AppColors.CardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "No matching ticker found for "$searchQuery". Try searching by company name (e.g. Palantir, Apple, Gold) or standard symbol (PLTR, AAPL, BTC-USD).",
+                            color = AppColors.TextSecondary,
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                }
+            } else {
+                items(searchResults, key = { it.symbol }) { item ->
+                    val inWatchlist = portfolio.watchlistSymbols.contains(item.symbol)
+                    val knownAsset = marketAssets[item.symbol]
+                    SearchResultRow(
+                        item = item,
+                        knownAsset = knownAsset,
+                        isInWatchlist = inWatchlist,
+                        onOpenChart = { openChartForSearchItem(item) },
+                        onToggleWatchlist = {
+                            if (inWatchlist) {
+                                if (portfolio.watchlistSymbols.size > 1) {
+                                    onRemoveWatchlistSymbol(item.symbol)
+                                }
+                            } else if (portfolio.isPro || usedSlots < maxSlots) {
+                                onAddWatchlistSymbol(item.symbol)
+                                Toast.makeText(context, "Added ${item.displaySymbol} to Watchlist", Toast.LENGTH_SHORT).show()
                             } else {
                                 showSlotUnlockDialog = true
                             }
                         }
+                    )
+                }
+            }
+        } else {
+            // 3. Normal Watchlist Header + Add Stock Button + Refresh
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = "My Watchlist",
+                            color = AppColors.TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = if (portfolio.isPro) {
+                                "$usedSlots pinned • Unlimited PRO slots • Tap any for chart"
+                            } else {
+                                "Slots: $usedSlots / $maxSlots (+1 per video ad) • Tap for chart"
+                            },
+                            color = AppColors.TextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        IconButton(
+                            onClick = onManualRefresh,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AppColors.CardDark)
+                                .border(1.dp, AppColors.CardBorder, RoundedCornerShape(10.dp))
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Add,
-                                contentDescription = "Add Ticker",
-                                tint = AppColors.BgDeep,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            if (isRefreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = AppColors.AccentCyan
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Rounded.Refresh,
+                                    contentDescription = "Refresh",
+                                    tint = AppColors.AccentCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        if (!portfolio.isPro && usedSlots >= maxSlots) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = AppColors.AccentGold,
+                                modifier = Modifier.clickable { showSlotUnlockDialog = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Add, contentDescription = null, tint = AppColors.BgDeep, modifier = Modifier.size(15.dp))
+                                    Text("+1 Slot", color = AppColors.BgDeep, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Category Filter Chips
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AssetCategory.values().forEach { cat ->
+                        val selected = selectedCategory == cat
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (selected) AppColors.AccentCyan.copy(alpha = 0.2f) else AppColors.CardDark,
+                            border = BorderStroke(
+                                1.dp,
+                                if (selected) AppColors.AccentCyan else AppColors.CardBorder
+                            ),
+                            modifier = Modifier.clickable { selectedCategory = cat }
+                        ) {
                             Text(
-                                text = "Ticker",
-                                color = AppColors.BgDeep,
+                                text = cat.label,
+                                color = if (selected) AppColors.AccentCyan else AppColors.TextSecondary,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
-                                softWrap = false
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                             )
                         }
                     }
                 }
             }
-        }
 
-        // Category Filter Row
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AssetCategory.values().forEach { cat ->
-                    val selected = selectedCategory == cat
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (selected) AppColors.AccentCyan.copy(alpha = 0.2f) else AppColors.CardDark,
-                        border = BorderStroke(
-                            1.dp,
-                            if (selected) AppColors.AccentCyan else AppColors.CardBorder
-                        ),
-                        modifier = Modifier.clickable { selectedCategory = cat }
-                    ) {
-                        Text(
-                            text = cat.label,
-                            color = if (selected) AppColors.AccentCyan else AppColors.TextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                        )
-                    }
-                }
+            // 5. Watchlist Cards
+            items(orderedWatchlist, key = { it.symbol }) { asset ->
+                MarketAssetCard(
+                    asset = asset,
+                    onClick = { inspectedAsset = asset }
+                )
             }
-        }
 
-        // Asset Rows
-        items(orderedAssets, key = { it.symbol }) { asset ->
-            MarketAssetCard(
-                asset = asset,
-                onClick = { inspectedSymbol = asset.symbol }
-            )
-        }
-
-        // Educational Compliance Footer
-        item {
-            Text(
-                text = "Quantitative technical indicators & virtual simulation for educational purposes only — not financial advice.",
-                color = AppColors.TextMuted,
-                fontSize = 10.5.sp,
-                lineHeight = 14.sp,
-                modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)
-            )
+            item {
+                Text(
+                    text = "Live market quotes & virtual trading simulation for educational purposes only — not financial advice.",
+                    color = AppColors.TextMuted,
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp)
+                )
+            }
         }
     }
 
-    // Slot Limit Reached Modal (1 Rewarded Video = +1 Slot!)
+    // Watchlist Slot Limit Dialog (+1 Slot per Rewarded Video Ad)
     if (showSlotUnlockDialog) {
         UnlockFeatureDialog(
             badge = "WATCHLIST LIMIT ($usedSlots / $maxSlots)",
-            title = "Add +1 Watchlist Slot",
-            description = "You are tracking $usedSlots assets. Watch 1 short video ad to permanently unlock +1 extra watchlist slot, or upgrade to PRO for unlimited tickers.",
+            title = "Unlock +1 Watchlist Slot",
+            description = "Searching and viewing live charts for any stock is always free. To pin more than $maxSlots favorites to your Watchlist, watch 1 short video ad for +1 slot or upgrade to PRO.",
             watchAdLabel = "Watch 1 Video (+1 Slot)",
             onDismiss = { showSlotUnlockDialog = false },
             onWatchAd = {
@@ -230,45 +380,129 @@ fun MarketScreen(
         )
     }
 
-    // Add Custom Ticker Modal
-    if (showAddTickerDialog) {
-        AddTickerDialog(
-            existingSymbols = portfolio.watchlistSymbols.toSet(),
-            onDismiss = { showAddTickerDialog = false },
-            onConfirmTicker = { sym ->
-                showAddTickerDialog = false
-                onAddTicker(sym)
-            }
-        )
-    }
-
-    // Asset Quant Signal & Quick Trade Modal Bottom Sheet
-    val inspectedAsset = inspectedSymbol?.let { marketAssets[it] }
-    if (inspectedAsset != null) {
-        val isFullSignalUnlocked = portfolio.isPro || portfolio.unlockedFullSignalSymbols.contains(inspectedAsset.symbol)
+    // Full Interactive Chart & Trade Bottom Sheet
+    val currentInspected = inspectedAsset?.let { marketAssets[it.symbol] ?: it }
+    if (currentInspected != null) {
+        val isInWatchlist = portfolio.watchlistSymbols.contains(currentInspected.symbol)
         ModalBottomSheet(
-            onDismissRequest = { inspectedSymbol = null },
+            onDismissRequest = { inspectedAsset = null },
             containerColor = AppColors.CardDark,
             contentColor = AppColors.TextPrimary
         ) {
-            AssetQuantDetailSheet(
-                asset = inspectedAsset,
-                canRemove = portfolio.watchlistSymbols.size > 1,
-                isFullSignalUnlocked = isFullSignalUnlocked,
-                onUnlockFullSignal = { onUnlockFullSignal(inspectedAsset.symbol) },
-                onOpenPro = {
-                    inspectedSymbol = null
-                    onOpenProDialog()
+            AssetDetailChartSheet(
+                asset = currentInspected,
+                isInWatchlist = isInWatchlist,
+                canRemoveFromWatchlist = portfolio.watchlistSymbols.size > 1,
+                onToggleWatchlist = {
+                    if (isInWatchlist) {
+                        if (portfolio.watchlistSymbols.size > 1) {
+                            onRemoveWatchlistSymbol(currentInspected.symbol)
+                            Toast.makeText(context, "Removed ${currentInspected.displaySymbol} from Watchlist", Toast.LENGTH_SHORT).show()
+                        }
+                    } else if (portfolio.isPro || usedSlots < maxSlots) {
+                        onAddWatchlistSymbol(currentInspected.symbol)
+                        Toast.makeText(context, "Added ${currentInspected.displaySymbol} to Watchlist", Toast.LENGTH_SHORT).show()
+                    } else {
+                        inspectedAsset = null
+                        showSlotUnlockDialog = true
+                    }
                 },
-                onTradeClick = {
-                    inspectedSymbol = null
-                    onQuickTradeAsset(inspectedAsset)
-                },
-                onRemoveClick = {
-                    inspectedSymbol = null
-                    onRemoveTicker(inspectedAsset.symbol)
+                onTradeAsset = { chosenAsset, side ->
+                    inspectedAsset = null
+                    onQuickTradeAsset(chosenAsset, side)
                 }
             )
+        }
+    }
+}
+
+@Composable
+private fun SearchResultRow(
+    item: TickerSearchResult,
+    knownAsset: MarketAsset?,
+    isInWatchlist: Boolean,
+    onOpenChart: () -> Unit,
+    onToggleWatchlist: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = AppColors.CardDark,
+        border = BorderStroke(1.dp, AppColors.CardBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpenChart() }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 13.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = item.symbol,
+                        color = AppColors.TextPrimary,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(5.dp),
+                        color = AppColors.CardElevated
+                    ) {
+                        Text(
+                            text = item.exchange,
+                            color = AppColors.AccentCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = item.name,
+                    color = AppColors.TextSecondary,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (knownAsset != null) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text(
+                        text = Formatters.formatPrice(knownAsset.price),
+                        color = AppColors.TextPrimary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = Formatters.formatPct(knownAsset.changePercent),
+                        color = if (knownAsset.changePercent >= 0) AppColors.AccentEmerald else AppColors.AccentRed,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onToggleWatchlist,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    imageVector = if (isInWatchlist) Icons.Rounded.Star else Icons.Rounded.AddCircleOutline,
+                    contentDescription = "Add Stock",
+                    tint = if (isInWatchlist) AppColors.AccentGold else AppColors.AccentCyan,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
         }
     }
 }
@@ -296,7 +530,6 @@ private fun MarketAssetCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Left: Symbol, Name & Signal Badge
             Column(
                 modifier = Modifier
                     .weight(1.15f)
@@ -339,7 +572,6 @@ private fun MarketAssetCard(
                 )
             }
 
-            // Middle: Sparkline
             MiniSparkline(
                 points = asset.sparkline,
                 isPositive = isUp,
@@ -348,7 +580,6 @@ private fun MarketAssetCard(
                     .height(28.dp)
             )
 
-            // Right: Live Price + Daily Change
             Column(
                 modifier = Modifier
                     .weight(0.85f)
@@ -374,350 +605,6 @@ private fun MarketAssetCard(
             }
         }
     }
-}
-
-@Composable
-private fun AssetQuantDetailSheet(
-    asset: MarketAsset,
-    canRemove: Boolean,
-    isFullSignalUnlocked: Boolean,
-    onUnlockFullSignal: () -> Unit,
-    onOpenPro: () -> Unit,
-    onTradeClick: () -> Unit,
-    onRemoveClick: () -> Unit
-) {
-    val sig = asset.signal
-    val sigColor = signalColorFor(sig.label)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 6.dp)
-            .padding(bottom = 26.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${asset.displaySymbol} • ${asset.symbol}",
-                    color = AppColors.AccentCyan,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = asset.name,
-                    color = AppColors.TextPrimary,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = Formatters.formatPrice(asset.price),
-                    color = AppColors.TextPrimary,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(
-                    text = Formatters.formatPct(asset.changePercent),
-                    color = if (asset.changePercent >= 0) AppColors.AccentEmerald else AppColors.AccentRed,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        // Quant Score Hero
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = AppColors.CardElevated,
-            border = BorderStroke(1.dp, sigColor.copy(alpha = 0.45f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "QUANT SIGNAL: ${sig.label.label}",
-                        color = sigColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = "Score ${sig.score}/100",
-                        color = AppColors.TextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Text(
-                    text = sig.summary,
-                    color = AppColors.TextSecondary,
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp
-                )
-                HorizontalDivider(color = AppColors.CardBorder, modifier = Modifier.padding(vertical = 2.dp))
-
-                // RSI (14) — Always Free
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("RSI (14) Momentum", color = AppColors.TextSecondary, fontSize = 12.5.sp)
-                    val rsiTag = when {
-                        sig.rsi14 < 30 -> "Oversold"
-                        sig.rsi14 > 70 -> "Overbought"
-                        else -> "Healthy"
-                    }
-                    Text(
-                        text = String.format(Locale.US, "%.1f (%s)", sig.rsi14, rsiTag),
-                        color = AppColors.TextPrimary,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // MACD + Bollinger + SMA 50/200 — PRO or 1 Rewarded Ad
-                if (isFullSignalUnlocked) {
-                    val trendText = if (sig.sma50 >= sig.sma200) "Golden Cross (Bullish)" else "Death Cross (Bearish)"
-                    IndicatorRow("SMA 50 / SMA 200", "${Formatters.formatPrice(sig.sma50)} / ${Formatters.formatPrice(sig.sma200)}")
-                    IndicatorRow("Trend Structure", trendText)
-                    IndicatorRow(
-                        "MACD (12, 26, 9)",
-                        String.format(Locale.US, "Line %.2f • Hist %+.2f", sig.macdLine, sig.macdHistogram)
-                    )
-                    IndicatorRow(
-                        "Bollinger (20, 2σ)",
-                        "${Formatters.formatPrice(sig.bollingerLower)} – ${Formatters.formatPrice(sig.bollingerUpper)}"
-                    )
-                } else {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = AppColors.BgDeep.copy(alpha = 0.85f),
-                        border = BorderStroke(1.dp, AppColors.AccentGold.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Lock,
-                                    contentDescription = null,
-                                    tint = AppColors.AccentGold,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "MACD, Bollinger Bands & SMA 50/200",
-                                    color = AppColors.TextPrimary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(
-                                    onClick = onUnlockFullSignal,
-                                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 40.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = AppColors.AccentCyan,
-                                        contentColor = AppColors.BgDeep
-                                    )
-                                ) {
-                                    Text("Watch 1 Ad", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, maxLines = 1, softWrap = false)
-                                }
-                                Button(
-                                    onClick = onOpenPro,
-                                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 40.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = AppColors.AccentGold,
-                                        contentColor = AppColors.BgDeep
-                                    )
-                                ) {
-                                    Text("Go PRO", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, maxLines = 1, softWrap = false)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Action Buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Button(
-                onClick = onTradeClick,
-                modifier = Modifier
-                    .weight(1f)
-                    .defaultMinSize(minHeight = 48.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AppColors.AccentEmerald,
-                    contentColor = AppColors.BgDeep
-                )
-            ) {
-                Icon(Icons.Rounded.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = "Trade in $100K Sim",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-
-            if (canRemove) {
-                OutlinedButton(
-                    onClick = onRemoveClick,
-                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, AppColors.AccentRed.copy(alpha = 0.6f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Delete,
-                        contentDescription = "Remove",
-                        tint = AppColors.AccentRed,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun IndicatorRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, color = AppColors.TextSecondary, fontSize = 12.sp)
-        Text(value, color = AppColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun AddTickerDialog(
-    existingSymbols: Set<String>,
-    onDismiss: () -> Unit,
-    onConfirmTicker: (String) -> Unit
-) {
-    var input by remember { mutableStateOf("") }
-    val suggestions = remember(existingSymbols) {
-        MarketRepository.catalog.filter { !existingSymbols.contains(it.symbol) }.take(8)
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = AppColors.CardDark,
-        shape = RoundedCornerShape(20.dp),
-        title = {
-            Text(
-                text = "Add Live Ticker",
-                color = AppColors.TextPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Enter any Yahoo Finance ticker (e.g., AAPL, MSFT, AMZN, META, BTC-USD, GLD, SI=F, EURUSD=X).",
-                    color = AppColors.TextSecondary,
-                    fontSize = 12.sp
-                )
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it.uppercase().replace(" ", "") },
-                    placeholder = { Text("e.g. AAPL or DOGE-USD", color = AppColors.TextMuted) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AppColors.AccentCyan,
-                        unfocusedBorderColor = AppColors.CardBorder,
-                        focusedTextColor = AppColors.TextPrimary,
-                        unfocusedTextColor = AppColors.TextPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (suggestions.isNotEmpty()) {
-                    Text(
-                        text = "Quick Pick:",
-                        color = AppColors.TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        suggestions.forEach { seed ->
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = AppColors.CardElevated,
-                                border = BorderStroke(1.dp, AppColors.CardBorder),
-                                modifier = Modifier.clickable { onConfirmTicker(seed.symbol) }
-                            ) {
-                                Text(
-                                    text = "+ ${seed.displaySymbol}",
-                                    color = AppColors.AccentCyan,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val clean = input.trim().uppercase()
-                    if (clean.isNotBlank()) onConfirmTicker(clean)
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AppColors.AccentCyan,
-                    contentColor = AppColors.BgDeep
-                )
-            ) {
-                Text("Add", fontWeight = FontWeight.ExtraBold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = AppColors.TextSecondary)
-            }
-        }
-    )
 }
 
 fun signalColorFor(label: SignalLabel): Color = when (label) {
