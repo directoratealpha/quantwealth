@@ -1,0 +1,4 @@
+-keep class com.directoratealpha.quantwealth.model.** { *; }
+-keep class com.google.android.gms.ads.** { *; }
+-keep class com.android.billingclient.api.** { *; }
+-dontwarn com.google.android.gms.**
