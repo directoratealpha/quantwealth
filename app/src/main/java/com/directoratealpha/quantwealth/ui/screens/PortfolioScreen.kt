@@ -298,10 +298,9 @@ fun PortfolioScreen(
                         trackColor = AppColors.CardBorder
                     )
 
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
                             text = if (requiredDailyPct > 0.0) {
@@ -313,17 +312,23 @@ fun PortfolioScreen(
                             fontSize = 11.5.sp
                         )
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             OutlinedButton(
                                 onClick = { showEditChallengeDialog = true },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 border = BorderStroke(1.dp, AppColors.CardBorder),
-                                modifier = Modifier.height(34.dp)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
                             ) {
                                 Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppColors.TextPrimary)
-                                Spacer(Modifier.width(4.dp))
-                                Text("Goal", fontSize = 11.5.sp, color = AppColors.TextPrimary, maxLines = 1, softWrap = false)
+                                Spacer(Modifier.width(5.dp))
+                                Text("Edit Goal", fontSize = 12.sp, color = AppColors.TextPrimary, maxLines = 1, softWrap = false)
                             }
 
                             Button(
@@ -339,17 +344,19 @@ fun PortfolioScreen(
                                         statusLabel = statusLabel
                                     )
                                 },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = AppColors.AccentCyan,
                                     contentColor = AppColors.BgDeep
                                 ),
-                                modifier = Modifier.height(34.dp)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
                             ) {
                                 Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("IG Story", fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
+                                Spacer(Modifier.width(5.dp))
+                                Text("IG Story", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
                             }
                         }
                     }

@@ -200,7 +200,7 @@ fun MarketScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                           text = "No matching ticker found for '$searchQuery'. Try searching by company name (e.g. Palantir, Apple, Gold) or standard symbol (PLTR, AAPL, BTC-USD).",
+                            text = "No matching ticker found for '$searchQuery'. Try searching by company name (e.g. Palantir, Apple, Gold) or standard symbol (PLTR, AAPL, BTC-USD).",
                             color = AppColors.TextSecondary,
                             fontSize = 12.5.sp,
                             lineHeight = 18.sp,

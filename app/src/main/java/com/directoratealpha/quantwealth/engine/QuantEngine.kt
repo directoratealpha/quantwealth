@@ -338,9 +338,32 @@ object QuantEngine {
         }
 
         val finalYearValues = yearlySnapshots[years]
-        val hitFireCount = finalYearValues.count { it >= fireTargetUsd }
-        val probHitFire = (hitFireCount.toDouble() / simulationsCount.toDouble()) * 100.0
+        val sortedFinal = finalYearValues.sortedArray()
+        val idx05 = ((simulationsCount - 1) * 0.05).roundToInt().coerceIn(0, simulationsCount - 1)
+        val idx95 = ((simulationsCount - 1) * 0.95).roundToInt().coerceIn(0, simulationsCount - 1)
+        val p5Final = sortedFinal[idx05]
+        val p95Final = sortedFinal[idx95]
+
+        val totalContributed = initialCapital + monthlyDca * 12.0 * years
         val medianFinal = p50Curve.last()
+        val medianProfitUsd = medianFinal - totalContributed
+
+        val lossCount = finalYearValues.count { it < totalContributed }
+        val hitFireCount = finalYearValues.count { it >= fireTargetUsd }
+        val profitBelowFireCount = finalYearValues.count { it >= totalContributed && it < fireTargetUsd }
+
+        val probLoss = (lossCount.toDouble() / simulationsCount.toDouble()) * 100.0
+        val probHitFire = (hitFireCount.toDouble() / simulationsCount.toDouble()) * 100.0
+        val probProfitBelowFire = (profitBelowFireCount.toDouble() / simulationsCount.toDouble()) * 100.0
+
+        var estFireYear: Int? = null
+        for (yr in 1..years) {
+            if (p50Curve[yr] >= fireTargetUsd) {
+                estFireYear = yr
+                break
+            }
+        }
+
         val monthlyFireIncome = (medianFinal * 0.04) / 12.0
 
         return MonteCarloResult(
@@ -359,6 +382,13 @@ object QuantEngine {
             medianFinalValue = medianFinal,
             p10FinalValue = p10Curve.last(),
             p90FinalValue = p90Curve.last(),
+            p5FinalValue = p5Final,
+            p95FinalValue = p95Final,
+            totalContributed = totalContributed,
+            medianProfitUsd = medianProfitUsd,
+            probabilityOfLossPct = probLoss,
+            probProfitBelowFirePct = probProfitBelowFire,
+            estimatedFireYear = estFireYear,
             medianMonthlyFireIncome = monthlyFireIncome,
             probabilityHitFirePct = probHitFire
         )

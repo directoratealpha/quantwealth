@@ -140,37 +140,46 @@ fun BacktestScreen(
                         modifier = Modifier.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
                                     text = "${res.symbolsLabel} (${res.years}Y)",
                                     color = AppColors.AccentCyan,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp)
                                 )
-                                Text(
-                                    text = Formatters.formatUsd(res.finalValue),
-                                    color = AppColors.TextPrimary,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (res.usedLiveData) AppColors.AccentEmerald.copy(alpha = 0.16f) else AppColors.AccentGold.copy(alpha = 0.16f)
+                                ) {
+                                    Text(
+                                        text = if (res.usedLiveData) "LIVE HISTORY" else "MODEL DATA",
+                                        color = if (res.usedLiveData) AppColors.AccentEmerald else AppColors.AccentGold,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
                             }
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (res.usedLiveData) AppColors.AccentEmerald.copy(alpha = 0.16f) else AppColors.AccentGold.copy(alpha = 0.16f)
-                            ) {
-                                Text(
-                                    text = if (res.usedLiveData) "LIVE HISTORY" else "MODEL DATA",
-                                    color = if (res.usedLiveData) AppColors.AccentEmerald else AppColors.AccentGold,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
-                                )
-                            }
+                            Text(
+                                text = Formatters.formatUsd(res.finalValue),
+                                color = AppColors.TextPrimary,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
                         }
 
                         BacktestEquityChart(

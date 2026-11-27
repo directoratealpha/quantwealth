@@ -167,6 +167,13 @@ data class MonteCarloResult(
     val medianFinalValue: Double,
     val p10FinalValue: Double,
     val p90FinalValue: Double,
+    val p5FinalValue: Double,
+    val p95FinalValue: Double,
+    val totalContributed: Double,
+    val medianProfitUsd: Double,
+    val probabilityOfLossPct: Double,
+    val probProfitBelowFirePct: Double,
+    val estimatedFireYear: Int?,
     val medianMonthlyFireIncome: Double,
     val probabilityHitFirePct: Double
 )
